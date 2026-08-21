@@ -26,6 +26,7 @@ const creditTransactions = ref<CreditTransaction[]>([])
 const closings = ref<DailyClosing[]>([])
 const session = ref<Session | null>(null)
 const loading = ref(true)
+const hasLoaded = ref(false)  // true after first successful data load
 const dataError = ref('')
 const authNotice = ref('')
 const syncingSettings = ref(false)
@@ -163,7 +164,8 @@ function mapClosing(row: any): DailyClosing {
 
 async function loadData() {
   if (!supabase || !session.value?.user) return
-  loading.value = true
+  // Only show the loading screen on the very first load
+  if (!hasLoaded.value) loading.value = true
   dataError.value = ''
 
   const [productsResult, batchesResult, salesResult, settingsResult, customersResult, creditTxResult, closingsResult] = await Promise.all([
@@ -204,6 +206,7 @@ async function loadData() {
   }
 
   loading.value = false
+  hasLoaded.value = true
 }
 
 async function addProduct(product: Omit<Product, 'id'>) {
@@ -603,30 +606,51 @@ onMounted(async () => {
     authNotice.value = 'Account confirmed. Redirecting to your dashboard...'
   }
 
-  const { data } = await supabase.auth.getSession()
-  session.value = data.session
-  if (session.value) {
-    await loadData()
-    if (hasAuthCallback) {
-      window.history.replaceState({}, document.title, window.location.pathname)
-      setTimeout(() => (authNotice.value = ''), 3500)
+  // Safety timeout — if loading takes more than 8 seconds, stop and show auth screen
+  const loadingTimeout = setTimeout(() => {
+    if (loading.value) {
+      loading.value = false
     }
-  } else {
-    loading.value = false
-  }
+  }, 8000)
 
-  supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+  // onAuthStateChange fires INITIAL_SESSION on mount which is more reliable than getSession
+  // for handling backgrounded tabs where the token was silently refreshed
+  supabase.auth.onAuthStateChange(async (event, nextSession) => {
     session.value = nextSession
+
     if (nextSession) {
       if (authNotice.value) authNotice.value = 'Account confirmed. Opening your dashboard...'
-      await loadData()
-      if (authNotice.value) setTimeout(() => (authNotice.value = ''), 3500)
-    } else {
+
+      // TOKEN_REFRESHED = tab came back from background, data is already loaded — do nothing
+      if (event === 'TOKEN_REFRESHED') {
+        clearTimeout(loadingTimeout)
+        return
+      }
+
+      // Only reload data if we don't have it yet
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        if (!hasLoaded.value) {
+          await loadData()
+        } else {
+          loading.value = false
+        }
+      }
+
+      if (hasAuthCallback) {
+        window.history.replaceState({}, document.title, window.location.pathname)
+        setTimeout(() => (authNotice.value = ''), 3500)
+      }
+      if (authNotice.value && event !== 'INITIAL_SESSION') {
+        setTimeout(() => (authNotice.value = ''), 3500)
+      }
+    } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
       products.value = []
       expiryBatches.value = []
       sales.value = []
       loading.value = false
     }
+
+    clearTimeout(loadingTimeout)
   })
 })
 </script>
@@ -643,7 +667,7 @@ VITE_SUPABASE_ANON_KEY=...</pre>
 
   <AuthView v-else-if="!session && !loading" />
 
-  <div v-else-if="loading" class="loading-page">
+  <div v-else-if="loading && !hasLoaded" class="loading-page">
     <div class="loader"></div>
     <p>{{ authNotice || 'Loading your store...' }}</p>
   </div>
@@ -681,7 +705,7 @@ VITE_SUPABASE_ANON_KEY=...</pre>
       <main class="main">
         <p v-if="dataError" class="data-error">{{ dataError }}</p>
         <!-- Dashboard -->
-        <div v-show="activeView === 'dashboard'" class="view-wrap">
+        <div v-if="activeView === 'dashboard'" class="view-wrap">
           <section class="hero">
             <div class="hero-top">
               <div>
@@ -786,20 +810,20 @@ VITE_SUPABASE_ANON_KEY=...</pre>
         </div>
 
         <!-- Products -->
-        <div v-show="activeView === 'products'" class="view-wrap full-height">
+        <template v-else-if="activeView === 'products'">
           <section class="content-grid full-height">
             <ProductList :products="products" :expiry-batches="expiryBatches" :currency="currency" :low-stock-threshold="lowStockThreshold" :expiry-warning-days="expiryWarningDays" :per-product-thresholds-enabled="perProductThresholdsEnabled" @edit-product="editProduct" @delete-product="deleteProduct" />
             <ProductForm :editing-product="editingProduct" :low-stock-threshold="lowStockThreshold" :per-product-thresholds-enabled="perProductThresholdsEnabled" @add-product="addProduct" @update-product="updateProduct" @cancel-edit="cancelEdit" />
           </section>
-        </div>
+        </template>
 
         <!-- Other views -->
-        <InventoryView v-show="activeView === 'inventory'" :products="products" :expiry-batches="expiryBatches" :currency="currency" :low-stock-threshold="lowStockThreshold" :expiry-warning-days="expiryWarningDays" :per-product-thresholds-enabled="perProductThresholdsEnabled" :initial-filter="inventoryFilter" @restock="restockProduct" @break-pack="breakPack" />
-        <SalesView v-show="activeView === 'sales'" :products="products" :sales="sales" :customers="customers" :currency="currency" :low-stock-threshold="lowStockThreshold" @sell="(pid, qty, pm, cid, name, mode) => sellProduct(pid, qty, pm, cid, name, mode)" />
-        <CustomersView v-show="activeView === 'customers'" :customers="customers" :transactions="creditTransactions" :currency="currency" @record-payment="recordPayment" @delete-customer="deleteCustomer" />
-        <CloseDayView v-show="activeView === 'closeday'" :sales="sales" :closings="closings" :currency="currency" @save-closing="saveClosing" @reopen-closing="reopenClosing" />
-        <ReportsView v-show="activeView === 'reports'" :products="products" :expiry-batches="expiryBatches" :sales="sales" :customers="customers" :closings="closings" :currency="currency" :low-stock-threshold="lowStockThreshold" :expiry-warning-days="expiryWarningDays" :per-product-thresholds-enabled="perProductThresholdsEnabled" :total-profit="totalProfit" :total-expenses="totalExpenses" :total-credit="totalCredit" />
-        <SettingsView v-show="activeView === 'settings'" />
+        <InventoryView v-else-if="activeView === 'inventory'" :products="products" :expiry-batches="expiryBatches" :currency="currency" :low-stock-threshold="lowStockThreshold" :expiry-warning-days="expiryWarningDays" :per-product-thresholds-enabled="perProductThresholdsEnabled" :initial-filter="inventoryFilter" @restock="restockProduct" @break-pack="breakPack" />
+        <SalesView v-else-if="activeView === 'sales'" :products="products" :sales="sales" :customers="customers" :currency="currency" :low-stock-threshold="lowStockThreshold" @sell="(pid, qty, pm, cid, name, mode) => sellProduct(pid, qty, pm, cid, name, mode)" />
+        <CustomersView v-else-if="activeView === 'customers'" :customers="customers" :transactions="creditTransactions" :currency="currency" @record-payment="recordPayment" @delete-customer="deleteCustomer" />
+        <CloseDayView v-else-if="activeView === 'closeday'" :sales="sales" :closings="closings" :currency="currency" @save-closing="saveClosing" @reopen-closing="reopenClosing" />
+        <ReportsView v-else-if="activeView === 'reports'" :products="products" :expiry-batches="expiryBatches" :sales="sales" :customers="customers" :closings="closings" :currency="currency" :low-stock-threshold="lowStockThreshold" :expiry-warning-days="expiryWarningDays" :per-product-thresholds-enabled="perProductThresholdsEnabled" :total-profit="totalProfit" :total-expenses="totalExpenses" :total-credit="totalCredit" />
+        <SettingsView v-else-if="activeView === 'settings'" />
       </main>
     </div>
   </div>
@@ -960,6 +984,7 @@ nav .active {
   padding: 16px;
   height: 100vh;
   overflow: hidden;
+  contain: strict;
 }
 
 .data-error {
@@ -1147,7 +1172,11 @@ nav .active {
 }
 
 .view-wrap {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
 }
 
 @media (max-width: 1180px) {

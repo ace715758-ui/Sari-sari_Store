@@ -25,11 +25,16 @@ const sessionId = ref('')
 const errorMsg = ref('')
 const EXPIRY_MINUTES = 10
 
-let realtimeChannel: ReturnType<typeof supabase.channel> | null = null
+let realtimeChannel: any = null
 let expiryTimer: ReturnType<typeof setTimeout> | null = null
 
 const scanUrl = computed(() => {
-  const base = window.location.origin
+  // In production, window.location.origin is the real domain (e.g. https://your-app.vercel.app).
+  // For LOCAL DEV only: phones can't reach "localhost" — set VITE_APP_URL in your .env file
+  // to your machine's local IP, e.g. VITE_APP_URL=http://192.168.1.42:5173
+  // Phone and desktop must be on the same WiFi for this to work locally.
+  // This env var is NOT needed once deployed to a real domain.
+  const base = import.meta.env.VITE_APP_URL || window.location.origin
   return `${base}/scan?session=${sessionId.value}`
 })
 
@@ -148,6 +153,10 @@ function cancel() {
   emit('close')
 }
 
+function copyUrl() {
+  navigator.clipboard.writeText(scanUrl.value)
+}
+
 onUnmounted(cleanup)
 
 // Start immediately
@@ -198,7 +207,7 @@ createSession()
         <!-- Plain-text URL for copy/paste -->
         <div class="url-box">
           <span class="url-text">{{ scanUrl }}</span>
-          <button class="copy-btn" @click="() => navigator.clipboard.writeText(scanUrl)">Copy</button>
+          <button class="copy-btn" @click="copyUrl">Copy</button>
         </div>
 
         <!-- Waiting indicator -->
