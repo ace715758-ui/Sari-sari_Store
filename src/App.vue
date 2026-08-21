@@ -233,7 +233,8 @@ async function addProduct(product: Omit<Product, 'id'>) {
     .single()
 
   if (error) {
-    dataError.value = error.message
+    console.error('[addProduct] Supabase error:', error)
+    dataError.value = `Failed to add product: ${error.message} (code: ${error.code})`
     return
   }
   products.value.unshift(mapProduct(data))
@@ -703,7 +704,10 @@ VITE_SUPABASE_ANON_KEY=...</pre>
       </aside>
 
       <main class="main">
-        <p v-if="dataError" class="data-error">{{ dataError }}</p>
+        <div v-if="dataError" class="data-error" @click="dataError = ''">
+          <strong>Error:</strong> {{ dataError }}
+          <span class="data-error-dismiss">✕ dismiss</span>
+        </div>
         <!-- Dashboard -->
         <div v-if="activeView === 'dashboard'" class="view-wrap">
           <section class="hero">
@@ -989,11 +993,24 @@ nav .active {
 
 .data-error {
   margin: 0;
-  padding: 10px 12px;
+  padding: 12px 16px;
   border-radius: 10px;
   color: #fca5a5;
-  background: rgba(239,68,68,0.15);
+  background: rgba(239,68,68,0.2);
+  border: 1px solid rgba(239,68,68,0.4);
   font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.data-error-dismiss {
+  font-size: 12px;
+  color: #f87171;
+  white-space: nowrap;
+  opacity: 0.7;
+}
 }
 
 .auth-notice {
