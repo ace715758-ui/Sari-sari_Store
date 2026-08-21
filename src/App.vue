@@ -1011,7 +1011,6 @@ nav .active {
   white-space: nowrap;
   opacity: 0.7;
 }
-}
 
 .auth-notice {
   position: fixed;
