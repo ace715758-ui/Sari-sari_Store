@@ -207,10 +207,11 @@ function submitForm() {
 
   if (props.editingProduct) {
     emit('update-product', { id: props.editingProduct.id, ...payload })
+    clearForm()
   } else {
     emit('add-product', payload)
+    clearForm()
   }
-  clearForm()
 }
 
 function clearForm() {

@@ -23,7 +23,8 @@ const state = ref<ModalState>('generating')
 const qrDataUrl = ref('')
 const sessionId = ref('')
 const errorMsg = ref('')
-const EXPIRY_MINUTES = 10
+const scanCount = ref(0)
+const EXPIRY_MINUTES = 20
 
 let realtimeChannel: any = null
 let expiryTimer: ReturnType<typeof setTimeout> | null = null
@@ -97,9 +98,11 @@ function subscribeToSession(id: string) {
       },
       async (payload) => {
         const row = payload.new as { status: string; scanned_barcode: string | null }
+        // Only process 'scanned' status — ignore the reset back to 'waiting'
         if (row.status === 'scanned' && row.scanned_barcode) {
-          cleanup()
+          scanCount.value++
           await handleScannedBarcode(row.scanned_barcode)
+          // Don't cleanup — keep listening for more scans
         }
       }
     )
@@ -213,10 +216,10 @@ createSession()
         <!-- Waiting indicator -->
         <div class="waiting-row">
           <div class="pulse-dot"></div>
-          <span>Waiting for scan...</span>
+          <span>{{ scanCount > 0 ? `${scanCount} scanned — waiting for more...` : 'Waiting for scan...' }}</span>
         </div>
 
-        <p class="expiry-note">This code expires in {{ EXPIRY_MINUTES }} minutes.</p>
+        <p class="expiry-note">Session expires in {{ EXPIRY_MINUTES }} minutes · <span class="end-link" @click="cancel">End session</span></p>
       </template>
 
     </div>
@@ -303,6 +306,9 @@ createSession()
 
 .expiry-note {
   font-size: 12px; color: #475569; margin: 0; text-align: center;
+}
+.end-link {
+  color: #f87171; cursor: pointer; text-decoration: underline;
 }
 
 /* Center states */
