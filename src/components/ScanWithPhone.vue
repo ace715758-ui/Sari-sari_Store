@@ -46,7 +46,9 @@ async function createSession() {
   state.value = 'generating'
   cleanup()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Get cached session — avoids a network round trip on repeat opens
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
   if (!user) { state.value = 'error'; errorMsg.value = 'Not signed in.'; return }
 
   const { data, error } = await supabase
@@ -63,17 +65,20 @@ async function createSession() {
 
   sessionId.value = data.id
 
-  // Generate QR code
-  qrDataUrl.value = await QRCode.toDataURL(scanUrl.value, {
-    width: 260,
-    margin: 2,
-    color: { dark: '#0f172a', light: '#f8fafc' },
-  })
+  // Generate QR code — run in parallel with subscription setup
+  const [qr] = await Promise.all([
+    QRCode.toDataURL(scanUrl.value, {
+      width: 260,
+      margin: 2,
+      color: { dark: '#0f172a', light: '#f8fafc' },
+    }),
+    Promise.resolve(subscribeToSession(data.id)),
+  ])
 
+  qrDataUrl.value = qr
   state.value = 'waiting'
-  subscribeToSession(data.id)
 
-  // Auto-expire after 10 minutes
+  // Auto-expire after 20 minutes
   expiryTimer = setTimeout(() => {
     if (state.value === 'waiting') {
       state.value = 'expired'
